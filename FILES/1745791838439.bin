@@ -1,0 +1,110 @@
+let handler = async (m, { conn, participants, usedPrefix, command }) => {
+  if (!global.tempKickData) global.tempKickData = {};
+
+  if (command === 'طرد-وقت' || command === 'kick-time') {
+    let kickte = `*يجب ذكر العضو أو الرد عليه مع تحديد المدة*\nمثال: ${usedPrefix}طرد-وقت @المستخدم 1h`;
+
+    if (!m.mentionedJid[0] && !m.quoted) return m.reply(kickte, m.chat, { mentions: conn.parseMention(kickte)});
+
+    let user = m.mentionedJid[0] || m.quoted.sender;
+
+    let timeStr = m.text.replace(usedPrefix + command, '').trim();
+    if (m.mentionedJid[0]) {
+      timeStr = timeStr.replace(`@${user.split('@')[0]}`, '').trim();
+    }
+    timeStr = timeStr.replace(/\s+/g, '');
+
+    const timeMatch = timeStr.match(/^(\d+)([mhdmo]+)$/i);
+    if (!timeMatch) return m.reply('تنسيق الوقت غير صحيح. مثال: 1h, 30m إلخ.');
+
+    const value = parseInt(timeMatch[1], 10);
+    const unit = timeMatch[2].toLowerCase();
+
+    let ms;
+    switch (unit) {
+      case 'm':
+        ms = value * 60 * 1000;
+        break;
+      case 'h':
+        ms = value * 60 * 60 * 1000;
+        break;
+      case 'd':
+        ms = value * 24 * 60 * 60 * 1000;
+        break;
+      case 'mo':
+        ms = value * 30 * 24 * 60 * 60 * 1000;
+        break;
+      default:
+        return m.reply('وحدة الوقت غير صحيحة. استخدم m (دقائق), h (ساعات), d (أيام), mo (شهور)');
+    }
+
+    if (!global.tempKickData[m.chat]) global.tempKickData[m.chat] = {};
+
+    const now = Date.now();
+    const kickTime = now + ms;
+    const remainingTime = ms;
+
+    global.tempKickData[m.chat][user] = setTimeout(async () => {
+      try {
+        await conn.groupParticipantsUpdate(m.chat, [user], 'remove');
+        await conn.sendMessage(m.chat, { 
+          text: `مرحبًا @${user.split('@')[0]}، لقد حان وقت طردك الذي كان محددة.\nتم طردك تلقائيًا.`, 
+          mentions: [user] 
+        });
+      } catch (error) {
+        console.error('فشل في الطرد:', error);
+      }
+      delete global.tempKickData[m.chat][user];
+    }, ms);
+
+    const formattedTime = new Date(kickTime).toLocaleString();
+    m.reply(
+      `*تم تحديد طرد العضو @${user.split('@')[0]}.\n` +
+      `تاريخ الطرد: ${formattedTime}\n` +
+      `الوقت المتبقي: ${formatTime(remainingTime)}*`,
+      null, { mentions: [user] }
+    );
+  }
+
+  if (command === 'اعفاء' || command === 'pardon') {
+    if (!m.mentionedJid[0] && !m.quoted) return m.reply('*يجب ذكر العضو أو الرد عليه لإلغاء الطرد المؤقت.*');
+
+    let user = m.mentionedJid[0] || m.quoted.sender;
+
+    if (!global.tempKickData[m.chat] || !global.tempKickData[m.chat][user]) {
+      return m.reply('*لا يوجد طرد مؤقت لهذا العضو.*');
+    }
+
+    clearTimeout(global.tempKickData[m.chat][user]);
+    delete global.tempKickData[m.chat][user];
+
+    m.reply(`*تم إلغاء الطرد المؤقت للعضو @${user.split('@')[0]}.*`, null, { mentions: [user] });
+  }
+}
+
+function formatTime(ms) {
+  const seconds = Math.floor((ms / 1000) % 60);
+  const minutes = Math.floor((ms / (1000 * 60)) % 60);
+  const hours = Math.floor((ms / (1000 * 60 * 60)) % 24);
+  const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+
+  let timeString = '';
+  if (days > 0) timeString += `${days} يوم `;
+  if (hours > 0) timeString += `${hours} ساعة `;
+  if (minutes > 0) timeString += `${minutes} دقيقة `;
+  if (seconds > 0) timeString += `${seconds} ثانية`;
+
+  return timeString.trim();
+}
+
+handler.help = [
+  'kick-time @user <وقت>',
+  'pardon @user'
+];
+handler.tags = ['group'];
+handler.command = /^(طرد-وقت|kick-time|اعفاء|pardon)$/i;
+handler.admin = true;
+handler.group = true;
+handler.botAdmin = true;
+
+export default handler;
